@@ -1,0 +1,1199 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>AR Operating System Process &amp; Deadlock Visualizer</title>
+<script src="https://aframe.io/releases/1.3.0/aframe.min.js"></script>
+<script src="https://raw.githack.com/AR-js-org/AR.js/master/aframe/build/aframe-ar.js"></script>
+<style>
+:root{--card:rgba(8,14,28,.86);--line:rgba(125,211,252,.28);--txt:#e2e8f0;--mut:#94a3b8;--acc:#38bdf8;--ok:#4ade80;--bad:#f87171;--warn:#fbbf24}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;height:100%;background:#000;color:var(--txt);font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;overflow:hidden}
+canvas{touch-action:none}
+.hidden{display:none!important}
+button{font:inherit;color:var(--txt);background:rgba(30,41,59,.9);border:1px solid var(--line);border-radius:12px;padding:9px 12px;min-height:40px;font-weight:700;font-size:13px;letter-spacing:.3px;cursor:pointer;transition:transform .08s,background .15s}
+button:active{transform:scale(.96)}
+button:disabled{opacity:.35;cursor:not-allowed}
+button.primary{background:linear-gradient(135deg,#0ea5e9,#2563eb);border-color:#38bdf8}
+button.danger{background:rgba(127,29,29,.75);border-color:#f87171}
+button.big{width:100%;min-height:46px;font-size:14px;background:linear-gradient(135deg,#7c3aed,#db2777);border-color:#e879f9}
+button.pulse{animation:pulse 1s infinite}
+@keyframes pulse{0%,100%{box-shadow:0 0 0 0 rgba(232,121,249,.7)}50%{box-shadow:0 0 0 9px rgba(232,121,249,0)}}
+
+/* landing + overlays */
+#landing,#camError,#loader{position:fixed;inset:0;z-index:60;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:22px;background:radial-gradient(ellipse at 50% 15%,#12305f 0%,#060b18 68%)}
+#landing:before{content:"";position:absolute;inset:0;background-image:linear-gradient(rgba(56,189,248,.08) 1px,transparent 1px),linear-gradient(90deg,rgba(56,189,248,.08) 1px,transparent 1px);background-size:38px 38px;mask-image:radial-gradient(circle at 50% 50%,#000 20%,transparent 75%);-webkit-mask-image:radial-gradient(circle at 50% 50%,#000 20%,transparent 75%)}
+#landing>*,#camError>*{position:relative}
+.kicker{letter-spacing:5px;color:var(--acc);font-weight:800;font-size:13px}
+h1{margin:6px 0 4px;font-size:clamp(26px,6vw,46px);line-height:1.1;background:linear-gradient(90deg,#7dd3fc,#c4b5fd,#f0abfc);-webkit-background-clip:text;background-clip:text;color:transparent}
+.sub{color:#cbd5e1;max-width:520px;line-height:1.5;margin:10px 0 18px}
+.lbtns{display:flex;gap:12px;flex-wrap:wrap;justify-content:center}
+.lbtns button{min-width:170px;min-height:52px;font-size:16px;border-radius:16px}
+.flowline{margin-top:20px;font-size:11px;color:var(--mut);max-width:560px;line-height:1.8}
+.flowline b{color:#7dd3fc;font-weight:700}
+.marker{display:flex;align-items:center;gap:12px;margin-top:16px;color:#cbd5e1;font-size:13px;text-align:left}
+.marker img{width:64px;height:64px;border-radius:8px;background:#fff;padding:3px}
+.marker a{color:var(--acc)}
+.spin{width:44px;height:44px;border:4px solid rgba(56,189,248,.25);border-top-color:#38bdf8;border-radius:50%;animation:sp 1s linear infinite;margin-bottom:14px}
+@keyframes sp{to{transform:rotate(360deg)}}
+
+/* HUD */
+#hud{position:fixed;inset:0;z-index:20;pointer-events:none}
+#hud .card{pointer-events:auto;background:var(--card);border:1px solid var(--line);border-radius:16px;backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);box-shadow:0 8px 30px rgba(0,0,0,.45)}
+#top{position:absolute;top:8px;left:8px;width:min(430px,calc(100% - 16px));padding:8px 10px}
+.rowb{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.brand{font-size:11px;letter-spacing:2px;color:var(--acc);font-weight:800}
+.badge{font-size:10px;padding:2px 8px;border-radius:99px;border:1px solid var(--line);color:var(--mut)}
+.mini{min-height:30px;padding:3px 10px;border-radius:9px;font-size:13px}
+#summary{font-size:11px;line-height:1.6;margin:5px 0;color:#cbd5e1}
+#summary b{color:#fff}
+.ok{color:var(--ok)}.bad{color:var(--bad)}.warn{color:var(--warn)}
+#concept{border-top:1px solid var(--line);padding-top:6px;font-size:12.5px;line-height:1.45}
+#cTitle{font-weight:800;color:#7dd3fc;letter-spacing:.5px;margin-bottom:2px}
+#miniLog{margin-top:6px;border-top:1px dashed rgba(148,163,184,.25);padding-top:5px;font:11px/1.45 ui-monospace,Menlo,Consolas,monospace;color:var(--mut)}
+#panel{border-top:1px solid var(--line);margin-top:6px;padding-top:6px;max-height:34vh;overflow:auto}
+.tabs{display:flex;gap:6px;margin-bottom:6px}
+.tabs button{min-height:30px;padding:3px 12px;font-size:11px}
+.tabs button.on{background:#0ea5e9;border-color:#7dd3fc}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:2px 10px;font-size:12px}
+.kv span:nth-child(odd){color:var(--mut)}
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.chips button{min-height:30px;padding:3px 10px;font-size:11px}
+#logList{font:11px/1.55 ui-monospace,Menlo,Consolas,monospace}
+#logList div span{color:var(--mut)}
+#bottom{position:absolute;left:8px;right:8px;bottom:8px;display:flex;flex-direction:column;gap:8px;align-items:center;max-height:68vh}
+#bottom>.card{width:min(560px,100%)}
+#banner{padding:10px 12px;overflow:auto;max-height:34vh;border-width:2px!important}
+#banner.deadlock{border-color:#ef4444!important;animation:alert 1.2s infinite}
+#banner.resolved,#banner.safe{border-color:#22c55e!important}
+@keyframes alert{0%,100%{box-shadow:0 0 0 0 rgba(239,68,68,.6)}50%{box-shadow:0 0 22px 2px rgba(239,68,68,.65)}}
+#banner .bt{font-weight:900;font-size:15px;display:flex;justify-content:space-between;align-items:center}
+#banner.deadlock .bt{color:#fca5a5}#banner.resolved .bt,#banner.safe .bt{color:#86efac}
+#banner p{margin:4px 0;font-size:12.5px;line-height:1.4}
+#banner .bh{margin-top:8px;font-size:10.5px;letter-spacing:1.5px;color:var(--acc);font-weight:800}
+#banner .acts{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:6px;margin-top:6px}
+#banner .x{min-height:28px;padding:2px 9px}
+#sheet{padding:8px 10px}
+#sheet .sh{display:flex;justify-content:space-between;align-items:center;font-size:11px;letter-spacing:2px;font-weight:800;color:var(--acc)}
+#sheet .sh small{letter-spacing:.3px;color:var(--mut);font-weight:600;margin-left:6px}
+.grp{margin-top:7px}
+.grp label{display:block;font-size:9.5px;letter-spacing:1.6px;color:var(--mut);margin-bottom:3px;font-weight:700}
+.btns{display:flex;flex-wrap:wrap;gap:6px}
+.btns button{flex:1 1 auto;padding:7px 8px;min-height:38px;font-size:12px}
+#flash{position:absolute;left:50%;bottom:44%;transform:translateX(-50%);background:rgba(15,23,42,.95);border:1px solid var(--warn);color:#fde68a;padding:8px 14px;border-radius:12px;font-size:13px;max-width:86%;text-align:center;opacity:0;transition:opacity .25s;pointer-events:none}
+#flash.on{opacity:1}
+#hint{position:absolute;left:50%;top:44%;transform:translate(-50%,-50%);background:rgba(8,14,28,.85);border:1px solid var(--acc);padding:12px 18px;border-radius:14px;text-align:center;font-size:14px;max-width:80%;pointer-events:none;animation:pulse 2s infinite}
+@media(min-width:900px){#top{width:440px}#bottom{left:auto;right:12px;width:560px;max-height:84vh}#panel{max-height:46vh}}
+</style>
+</head>
+<body>
+
+<!-- ===================== START SCREEN ===================== -->
+<div id="landing">
+  <div class="kicker">AR OPERATING SYSTEM</div>
+  <h1>PROCESS &amp; DEADLOCK VISUALIZER</h1>
+  <div class="sub">Learn how processes move, resources are allocated, and deadlocks occur &mdash; as one connected 3D simulation.</div>
+  <div class="lbtns">
+    <button class="primary" id="btnStartAR">START AR</button>
+    <button id="btnStart3D">3D DEMO</button>
+  </div>
+  <div class="marker">
+    <img alt="Hiro marker" src="https://raw.githubusercontent.com/AR-js-org/AR.js/master/data/images/hiro.png">
+    <div><b>Point your camera at the Hiro marker.</b><br>Print it or open it on another screen:<br><a href="https://raw.githubusercontent.com/AR-js-org/AR.js/master/data/images/hiro.png" target="_blank" rel="noopener">Hiro marker image</a></div>
+  </div>
+  <div class="flowline"><b>PROCESS</b> &rarr; <b>READY QUEUE</b> &rarr; <b>CPU</b> &rarr; <b>RESOURCE REQUEST</b> &rarr; <b>ALLOCATION</b> &rarr; <b>WAITING</b> &rarr; <b>DEADLOCK</b> &rarr; <b>RECOVERY</b> &rarr; <b>SAFE</b></div>
+</div>
+
+<div id="loader" class="hidden"><div class="spin"></div><div id="loaderText">Starting&hellip;</div></div>
+
+<div id="camError" class="hidden">
+  <h1 style="font-size:28px">Camera access is required for AR.</h1>
+  <div class="sub">Please allow camera permission and reload the page.<span id="camWhy"></span></div>
+  <div class="lbtns">
+    <button class="primary" id="btnReload">RELOAD</button>
+    <button id="btnFallback">OPEN 3D SIMULATION MODE</button>
+  </div>
+</div>
+
+<!-- A-Frame scene is injected here (AR or 3D mode) -->
+<div id="sceneHost"></div>
+
+<!-- ===================== HUD ===================== -->
+<div id="hud" class="hidden">
+  <div id="top" class="card">
+    <div class="rowb">
+      <span class="brand">OS VISUALIZER</span>
+      <span class="badge" id="modeBadge">AR MODE</span>
+      <span><button class="mini" id="btnPanel" title="Status &amp; log">&#9776;</button> <button class="mini" id="btnHome" title="Exit">&#10005;</button></span>
+    </div>
+    <div id="summary"></div>
+    <div id="concept"><div id="cTitle"></div><div id="cText"></div></div>
+    <div id="miniLog"></div>
+    <div id="panel" class="hidden">
+      <div class="tabs"><button data-tab="status" class="on">STATUS</button><button data-tab="log">EVENT LOG</button></div>
+      <div id="tabStatus"></div>
+      <div id="tabLog" class="hidden"><div id="logList"></div></div>
+    </div>
+  </div>
+  <div id="hint">Point your camera at the <b>Hiro marker</b></div>
+  <div id="flash"></div>
+  <div id="bottom">
+    <div id="banner" class="card hidden"></div>
+    <div id="sheet" class="card">
+      <div class="sh"><span>CONTROLS<small id="actor"></small></span><button class="mini" id="btnSheet">&#9660;</button></div>
+      <div id="sheetBody">
+        <div class="grp"><label>SCENARIOS</label><div class="btns">
+          <button data-act="sc-normal">NORMAL FLOW</button>
+          <button data-act="sc-alloc">RESOURCE ALLOCATION</button>
+          <button data-act="sc-dead">CREATE DEADLOCK</button>
+          <button data-act="reset" class="danger">RESET</button></div></div>
+        <div class="grp"><label>PROCESSES</label><div class="btns">
+          <button data-act="create-P1">+ P1</button><button data-act="create-P2">+ P2</button><button data-act="create-P3">+ P3</button>
+          <button data-act="run" class="primary">RUN NEXT &#9654;</button>
+          <button data-act="terminate">TERMINATE</button></div></div>
+        <div class="grp"><label>REQUEST RESOURCE (selected / running process)</label><div class="btns">
+          <button data-act="req-R1">&rarr; R1</button><button data-act="req-R2">&rarr; R2</button><button data-act="req-R3">&rarr; R3</button></div></div>
+        <div class="grp"><label>RELEASE RESOURCE</label><div class="btns">
+          <button data-act="rel-R1">R1 &#10005;</button><button data-act="rel-R2">R2 &#10005;</button><button data-act="rel-R3">R3 &#10005;</button></div></div>
+        <div class="grp"><button class="big" data-act="detect" id="btnDetect">DETECT DEADLOCK</button></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function(){
+'use strict';
+
+var THREE = window.AFRAME ? AFRAME.THREE : null;
+function $(s){ return document.querySelector(s); }
+function esc(s){ return String(s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];}); }
+function pad(n){ return n<10?'0'+n:''+n; }
+function uniq(a){ return a.filter(function(x,i){ return a.indexOf(x)===i; }); }
+
+/* ======================================================================
+   SIMULATION  (single source of truth: S)
+   ====================================================================== */
+//<SIM>
+// ===============================
+// SIMULATION STATE
+// ===============================
+var PIDS=['P1','P2','P3'];
+var RES_DEF=[
+  {id:'R1',name:'Memory',total:1,x:-3},
+  {id:'R2',name:'Disk',total:1,x:0},
+  {id:'R3',name:'I/O Port',total:2,x:3}
+];
+var PCOL={P1:'#3b82f6',P2:'#a855f7',P3:'#ec4899'};
+var CANCEL={};
+var EPOCH=0, RUN=0, busy=0;
+var TR=newTrace();
+
+function newTrace(){ return {released:[],granted:[],terminated:null,denied:null,dispatched:null}; }
+function createResource(def){ return {id:def.id,name:def.name,total:def.total}; }
+function freshState(){
+  return {
+    processes:[],                       // {id,state}
+    resources:RES_DEF.map(createResource),
+    allocations:[],                     // {res,proc}  one entry per allocated instance  (R -> P)
+    requests:[],                        // {proc,res}  pending request                   (P -> R)
+    readyQueue:[],
+    currentCPUProcess:null,
+    terminated:[],
+    deadlockedProcesses:[],
+    cycle:[],
+    systemState:'SAFE',                 // SAFE | DEADLOCK
+    checked:true,                       // false when pending requests have not been analysed yet
+    selected:null, view:'concept', concept:'WELCOME',
+    events:[], banner:null, ctx:null
+  };
+}
+var S=freshState();
+
+function getProc(id){ return S.processes.filter(function(p){return p.id===id;})[0]; }
+function getRes(id){ return S.resources.filter(function(r){return r.id===id;})[0]; }
+function heldBy(pid){ return S.allocations.filter(function(a){return a.proc===pid;}).map(function(a){return a.res;}); }
+function holdersOf(rid){ return S.allocations.filter(function(a){return a.res===rid;}).map(function(a){return a.proc;}); }
+function available(rid){ return getRes(rid).total-holdersOf(rid).length; }
+function requestOf(pid){ return S.requests.filter(function(q){return q.proc===pid;})[0]; }
+function listJoin(a){ return a.length?a.join(', '):'-'; }
+
+function logEvent(msg){
+  var d=new Date();
+  S.events.unshift({t:pad(d.getHours())+':'+pad(d.getMinutes()),msg:msg});
+  if(S.events.length>30) S.events.length=30;
+  updateEventLog();
+}
+function setConcept(k){ S.concept=k; S.view='concept'; renderConcept(); }
+function settleChecked(){
+  S.checked = S.requests.length===0;
+  if(S.requests.length===0 && S.systemState==='DEADLOCK'){ S.systemState='SAFE'; S.cycle=[]; S.deadlockedProcesses=[]; }
+}
+
+// ===============================
+// PROCESS MANAGEMENT
+// ===============================
+function createProcess(id,opts){
+  opts=opts||{};
+  if(PIDS.indexOf(id)<0) return null;
+  if(getProc(id)){ logEvent(id+' already exists'); return null; }
+  S.processes.push({id:id,state:'NEW'});
+  logEvent(id+' created (NEW)');
+  setConcept('NEW');
+  if(opts.auto!==false){
+    var ep=EPOCH;
+    setTimeout(function(){
+      if(ep!==EPOCH) return;
+      var p=getProc(id);
+      if(p && p.state==='NEW'){ moveProcessToState(id,'READY'); }
+    },1300);
+  }
+  onChange();
+  return getProc(id);
+}
+
+function moveProcessToState(id,state,opts){
+  opts=opts||{};
+  var p=getProc(id); if(!p) return;
+  var old=p.state;
+  if(old==='READY') S.readyQueue=S.readyQueue.filter(function(x){return x!==id;});
+  if(old==='RUNNING' && S.currentCPUProcess===id) S.currentCPUProcess=null;
+  p.state=state;
+  if(state==='READY') S.readyQueue.push(id);
+  if(state==='RUNNING') S.currentCPUProcess=id;
+  if(state==='TERMINATED' && S.terminated.indexOf(id)<0) S.terminated.push(id);
+  var msg={READY:id+' moved to READY',RUNNING:id+' assigned CPU',WAITING:id+' moved to WAITING',TERMINATED:id+' terminated',NEW:id+' is NEW'}[state];
+  if(!opts.quiet) logEvent(opts.msg||msg);
+  setConcept(state);
+  onChange();
+}
+
+async function runNextCore(w){
+  var cur=S.currentCPUProcess, head=S.readyQueue[0];
+  if(!cur && !head){ logEvent('No READY process to run'); flash('No READY process \u2014 create one first'); return; }
+  if(!cur){ moveProcessToState(head,'RUNNING'); return; }
+  if(!head){ logEvent(cur+' is the only runnable process'); flash('No other READY process to switch to'); return; }
+  // context switch: save current -> READY, then load next
+  S.ctx={from:cur,to:head,until:Date.now()+2100};
+  setConcept('CONTEXT');
+  logEvent('Context switch: '+cur+' \u2192 '+head);
+  moveProcessToState(cur,'READY',{msg:cur+' state saved \u2192 READY'});
+  setConcept('CONTEXT');
+  await w(700);
+  moveProcessToState(head,'RUNNING');
+  setConcept('CONTEXT');
+}
+
+function dispatchIfIdle(prefer){
+  if(!S.currentCPUProcess && S.readyQueue.length){
+    var id=(prefer && S.readyQueue.indexOf(prefer)>=0)?prefer:S.readyQueue[0];
+    moveProcessToState(id,'RUNNING');
+    TR.dispatched=id;
+  }
+}
+
+// ===============================
+// RESOURCE MANAGEMENT
+// ===============================
+function allocateResource(pid,rid){
+  S.allocations.push({res:rid,proc:pid});
+  logEvent(rid+' allocated to '+pid);
+  setConcept('ALLOCATION');
+}
+
+function requestResource(pid,rid){
+  var p=getProc(pid), r=getRes(rid);
+  if(!p||!r) return false;
+  if(p.state==='NEW'){ flash(pid+' is still NEW \u2014 wait until it is READY'); return false; }
+  if(p.state==='TERMINATED'){ flash(pid+' is terminated'); return false; }
+  if(p.state==='WAITING'){ flash(pid+' is already waiting for '+requestOf(pid).res); return false; }
+  if(heldBy(pid).filter(function(x){return x===rid;}).length>=r.total){ flash(pid+' already holds all of '+rid); return false; }
+  if(available(rid)>0){ allocateResource(pid,rid); settleChecked(); onChange(); return true; }
+  S.requests.push({proc:pid,res:rid});
+  S.checked=false;
+  logEvent(pid+' requested '+rid+' \u2014 none free');
+  moveProcessToState(pid,'WAITING');
+  setConcept('REQUEST');
+  onChange();
+  return true;
+}
+
+function grantWaiting(rid){
+  while(available(rid)>0){
+    var qi=-1;
+    for(var i=0;i<S.requests.length;i++){ if(S.requests[i].res===rid){ qi=i; break; } }
+    if(qi<0) break;
+    var q=S.requests.splice(qi,1)[0];
+    S.allocations.push({res:rid,proc:q.proc});
+    TR.granted.push({proc:q.proc,res:rid});
+    logEvent(rid+' allocated to '+q.proc+' (was waiting)');
+    moveProcessToState(q.proc,'READY');
+  }
+}
+
+function releaseResource(pid,rid,opts){
+  opts=opts||{};
+  var i=-1;
+  for(var k=0;k<S.allocations.length;k++){ if(S.allocations[k].proc===pid && S.allocations[k].res===rid){ i=k; break; } }
+  if(i<0){ flash(pid+' does not hold '+rid); return false; }
+  S.allocations.splice(i,1);
+  TR.released.push({proc:pid,res:rid});
+  logEvent(opts.forced? rid+' forcibly released from '+pid+' (preempted)' : pid+' released '+rid);
+  grantWaiting(rid);
+  settleChecked();
+  onChange();
+  return true;
+}
+
+function terminateProcess(pid){
+  var p=getProc(pid);
+  if(!p || p.state==='TERMINATED') return false;
+  var held=uniq(heldBy(pid));
+  S.requests=S.requests.filter(function(q){return q.proc!==pid;});
+  moveProcessToState(pid,'TERMINATED');
+  TR.terminated=pid;
+  S.allocations.filter(function(a){return a.proc===pid;}).forEach(function(a){ TR.released.push({proc:pid,res:a.res}); });
+  S.allocations=S.allocations.filter(function(a){return a.proc!==pid;});
+  held.forEach(function(r){ logEvent(r+' released by '+pid); });
+  held.forEach(grantWaiting);
+  settleChecked();
+  onChange();
+  return true;
+}
+
+function denyRequest(pid){
+  var q=requestOf(pid);
+  if(!q) return false;
+  S.requests=S.requests.filter(function(x){return x!==q;});
+  TR.denied={proc:pid,res:q.res};
+  logEvent('Request '+pid+' \u2192 '+q.res+' denied');
+  moveProcessToState(pid,'READY');
+  settleChecked();
+  onChange();
+  return true;
+}
+
+// ===============================
+// DEADLOCK DETECTION
+// ===============================
+// Resource-allocation graph:  request  P -> R    allocation  R -> P
+function buildGraph(allowed){
+  var adj={};
+  S.processes.forEach(function(p){ if(p.state!=='TERMINATED') adj[p.id]=[]; });
+  S.resources.forEach(function(r){ adj[r.id]=[]; });
+  S.requests.forEach(function(q){
+    if(!adj[q.proc]) return;
+    if(allowed && !allowed[q.proc]) return;
+    adj[q.proc].push(q.res);
+  });
+  S.allocations.forEach(function(a){
+    if(!adj[a.proc]) return;
+    if(allowed && !allowed[a.proc]) return;
+    if(adj[a.res].indexOf(a.proc)<0) adj[a.res].push(a.proc);
+  });
+  return adj;
+}
+
+// DFS cycle detection (back edge on the recursion stack)
+function findCycle(adj){
+  var color={}, stack=[], found=null;
+  function dfs(u){
+    color[u]=1; stack.push(u);
+    var nb=adj[u]||[];
+    for(var i=0;i<nb.length;i++){
+      var v=nb[i];
+      if(found) return;
+      if(color[v]===1){ found=stack.slice(stack.indexOf(v)); return; }
+      if(!color[v]) dfs(v);
+      if(found) return;
+    }
+    stack.pop(); color[u]=2;
+  }
+  var keys=Object.keys(adj);
+  for(var k=0;k<keys.length && !found;k++){ if(!color[keys[k]]) dfs(keys[k]); }
+  return found;
+}
+
+function rotateCycle(c){
+  var best=-1;
+  for(var i=0;i<c.length;i++){ if(c[i][0]==='P' && (best<0 || c[i]<c[best])) best=i; }
+  if(best<0) return c;
+  return c.slice(best).concat(c.slice(0,best));
+}
+
+// Resource-reduction: which processes can never finish? (handles multi-instance resources)
+function reduceDeadlocked(){
+  var work={};
+  S.resources.forEach(function(r){ work[r.id]=available(r.id); });
+  var active=S.processes.filter(function(p){return p.state!=='TERMINATED';});
+  var fin={}, progress=true;
+  while(progress){
+    progress=false;
+    active.forEach(function(p){
+      if(fin[p.id]) return;
+      var q=requestOf(p.id);
+      if(!q || work[q.res]>0){
+        fin[p.id]=true;
+        S.allocations.forEach(function(a){ if(a.proc===p.id) work[a.res]++; });
+        progress=true;
+      }
+    });
+  }
+  return active.filter(function(p){return !fin[p.id];}).map(function(p){return p.id;});
+}
+
+function cycleStr(c){ return c.length? c.concat([c[0]]).join(' \u2192 ') : ''; }
+function cycleProcs(){ return S.cycle.filter(function(n){return n[0]==='P';}); }
+
+function detectDeadlock(opts){
+  opts=opts||{};
+  var deadlocked=reduceDeadlocked();
+  var anyCycle=findCycle(buildGraph(null));
+  var cycle=null;
+  if(deadlocked.length){
+    var allowed={}; deadlocked.forEach(function(id){ allowed[id]=true; });
+    cycle=findCycle(buildGraph(allowed));
+    if(cycle) cycle=rotateCycle(cycle);
+  }
+  S.deadlockedProcesses=deadlocked;
+  S.cycle=cycle||[];
+  S.checked=true;
+  S.systemState=deadlocked.length?'DEADLOCK':'SAFE';
+  if(S.systemState==='DEADLOCK'){
+    logEvent('Deadlock detected: '+cycleStr(S.cycle));
+    setConcept('DEADLOCK');
+    if(!opts.silent) showDeadlockBanner();
+  } else {
+    logEvent('Deadlock check: no circular wait \u2014 system safe');
+    setConcept('SAFE');
+    if(!opts.silent) showSafeBanner(!!anyCycle);
+  }
+  onChange();
+  return {deadlock:S.systemState==='DEADLOCK',cycle:S.cycle,deadlocked:deadlocked,anyCycle:!!anyCycle};
+}
+
+function whyLines(){
+  var cp=cycleProcs(), L=[];
+  cp.forEach(function(p){
+    var held=uniq(heldBy(p)), q=requestOf(p);
+    L.push(p+' holds '+(held.join(', ')||'nothing')+(q?' but waits for '+q.res+'.':'.'));
+  });
+  L.push(cp.length===2?'Neither process can continue.':'None of these processes can continue.');
+  L.push('Therefore: '+cycleStr(S.cycle)+' forms a circular wait.');
+  return L;
+}
+
+function recoveryActions(){
+  var cp=cycleProcs(), A=[];
+  cp.forEach(function(p){ A.push({label:'TERMINATE '+p,kind:'terminate',proc:p}); });
+  cp.forEach(function(p){ uniq(heldBy(p)).forEach(function(r){ if(S.cycle.indexOf(r)>=0) A.push({label:'RELEASE '+r+' (from '+p+')',kind:'release',proc:p,res:r}); }); });
+  cp.forEach(function(p){ var q=requestOf(p); if(q) A.push({label:'BLOCK '+p+' \u2192 '+q.res,kind:'deny',proc:p}); });
+  A.push({label:'RESET SCENARIO',kind:'reset'});
+  return A;
+}
+
+function showDeadlockBanner(prefix){
+  var lines=[];
+  if(prefix) lines.push(prefix);
+  lines.push('Circular wait detected between: '+cycleProcs().join(', '));
+  lines.push('Cycle: '+cycleStr(S.cycle));
+  lines.push('## WHY DEADLOCK OCCURRED');
+  whyLines().forEach(function(l){ lines.push(l); });
+  lines.push('Normal execution is paused until the cycle is broken.');
+  S.banner={kind:'deadlock',title:'\u26A0 DEADLOCK DETECTED',lines:lines,actions:recoveryActions()};
+  renderBanner();
+}
+
+function showSafeBanner(hadCycle){
+  var lines=[];
+  if(S.requests.length===0){
+    lines.push('No process is waiting for a resource.');
+  } else {
+    S.requests.forEach(function(q){
+      var h=holdersOf(q.res);
+      lines.push(q.proc+' waits for '+q.res+(h.length?' (held by '+uniq(h).join(', ')+').':'.'));
+    });
+    lines.push('Every waiting process depends on a process that can still finish and release its resources.');
+  }
+  if(hadCycle) lines.push('A cycle exists in the graph, but the resource has spare instances elsewhere, so it is not a deadlock.');
+  lines.push('No circular wait exists. The system can still make progress.');
+  S.banner={kind:'safe',title:'\u2713 NO DEADLOCK \u00B7 SYSTEM SAFE',lines:lines,actions:[]};
+  renderBanner();
+}
+
+// ===============================
+// DEADLOCK RECOVERY
+// ===============================
+function resolvedLines(act){
+  var L=['## HOW DEADLOCK WAS RESOLVED'];
+  if(act.kind==='terminate') L.push(act.proc+' was terminated.');
+  if(act.kind==='release') L.push(act.res+' was forcibly released from '+act.proc+' (resource preemption).');
+  if(act.kind==='deny'){ L.push(act.proc+"'s request for "+(TR.denied?TR.denied.res:'?')+' was denied.'); L.push(act.proc+' returned to READY.'); }
+  if(act.kind==='terminate' && TR.released.length){
+    var rs=uniq(TR.released.map(function(x){return x.res;}));
+    L.push(rs.join(', ')+(rs.length>1?' were':' was')+' released.');
+  }
+  TR.granted.forEach(function(g){ L.push(g.proc+' acquired '+g.res+'.'); });
+  if(TR.dispatched) L.push(TR.dispatched+' moved to RUNNING and continues.');
+  L.push('The circular wait disappeared.');
+  L.push('The system is now safe.');
+  return L;
+}
+
+function recoverFromDeadlock(act){
+  if(S.systemState!=='DEADLOCK') return;
+  TR=newTrace();
+  if(act.kind==='terminate') terminateProcess(act.proc);
+  else if(act.kind==='release') releaseResource(act.proc,act.res,{forced:true});
+  else if(act.kind==='deny') denyRequest(act.proc);
+  else return;
+  dispatchIfIdle(TR.granted.length?TR.granted[0].proc:null);
+  var r=detectDeadlock({silent:true});
+  if(r.deadlock){
+    showDeadlockBanner('Still deadlocked after that action \u2014 choose another recovery option.');
+  } else {
+    logEvent('Deadlock resolved \u2014 system safe');
+    S.banner={kind:'resolved',title:'\u2713 DEADLOCK RESOLVED \u00B7 \u2713 SYSTEM SAFE',lines:resolvedLines(act),actions:[]};
+    renderBanner();
+  }
+  onChange();
+}
+
+// ===============================
+// RESET / SCENARIOS
+// ===============================
+function resetSimulation(silent){
+  RUN++; EPOCH++; busy=0; TR=newTrace();
+  destroyVisuals();
+  S=freshState();
+  if(!silent) logEvent('System reset \u2014 clean initial state');
+  renderBanner(); onChange(); updateEventLog(); updateControls();
+}
+
+async function withLock(fn){
+  if(busy>0) return;
+  var tk=RUN; busy++; updateControls();
+  var w=function(ms){ return new Promise(function(res,rej){ setTimeout(function(){ if(RUN===tk) res(); else rej(CANCEL); },ms); }); };
+  try{ await fn(w); }
+  catch(e){ if(e!==CANCEL) console.error(e); }
+  finally{ if(RUN===tk) busy=Math.max(0,busy-1); updateControls(); onChange(); }
+}
+
+async function allocSetup(w){
+  createProcess('P1',{auto:false}); await w(650);
+  createProcess('P2',{auto:false}); await w(650);
+  moveProcessToState('P1','READY'); await w(500);
+  moveProcessToState('P2','READY'); await w(700);
+  await runNextCore(w); await w(800);                 // P1 -> CPU
+  requestResource('P1','R1'); await w(1000);          // P1 holds R1
+  await runNextCore(w); await w(900);                 // context switch: P2 -> CPU
+  requestResource('P2','R2'); await w(1000);          // P2 holds R2
+}
+
+function loadScenario(kind){
+  resetSimulation(true);
+  withLock(async function(w){
+    if(kind==='normal'){
+      ['P1','P2','P3'].forEach(function(id){ createProcess(id,{auto:false}); });
+      await w(1000);
+      for(var i=0;i<PIDS.length;i++){ moveProcessToState(PIDS[i],'READY'); await w(500); }
+      await w(500);
+      await runNextCore(w); await w(1200);            // P1 RUNNING
+      terminateProcess('P1'); await w(1000);          // P1 TERMINATED
+      await runNextCore(w); await w(1000);            // P2 RUNNING
+      await runNextCore(w); await w(500);             // context switch -> P3 RUNNING, P2 READY
+      logEvent('Normal flow complete: NEW \u2192 READY \u2192 RUNNING \u2192 TERMINATED');
+    } else if(kind==='alloc'){
+      await allocSetup(w);
+      logEvent('Resource allocation: P1 holds R1, P2 holds R2');
+      setConcept('ALLOCATION');
+    } else if(kind==='dead'){
+      await allocSetup(w);
+      await runNextCore(w); await w(900);             // P1 back on CPU
+      requestResource('P1','R2'); await w(1100);      // P1 blocks on R2 (held by P2)
+      await runNextCore(w); await w(900);             // P2 on CPU
+      requestResource('P2','R1'); await w(600);       // P2 blocks on R1 (held by P1)
+      logEvent('Circular wait created \u2014 press DETECT DEADLOCK');
+      flash('Circular wait created \u2014 press DETECT DEADLOCK');
+      setConcept('WAITING');
+    }
+  });
+}
+//</SIM>
+
+/* ======================================================================
+   UI MANAGEMENT
+   ====================================================================== */
+var CONCEPTS={
+  WELCOME:{t:'WELCOME',x:'Create processes with + P1, + P2, + P3, then RUN NEXT. Tap any process or resource for details.'},
+  NEW:{t:'PROCESS STATE: NEW',x:'The process was just created and the OS is preparing its control block. Next: READY.'},
+  READY:{t:'PROCESS STATE: READY',x:'A process in the Ready state is waiting for CPU time. Next possible state: RUNNING.'},
+  RUNNING:{t:'PROCESS STATE: RUNNING',x:'The process is currently executing on the CPU. Next: READY, WAITING or TERMINATED.'},
+  WAITING:{t:'PROCESS STATE: WAITING',x:'The process is waiting for an event or resource. Next: READY once it is granted.'},
+  TERMINATED:{t:'PROCESS STATE: TERMINATED',x:'The process has finished (or was killed). All resources it held are released.'},
+  CONTEXT:{t:'CONTEXT SWITCH',x:'The OS saves the state of the current process and loads the state of another process.'},
+  ALLOCATION:{t:'ALLOCATION (solid arrow R \u2192 P)',x:'The resource instance is currently allocated to that process.'},
+  REQUEST:{t:'REQUEST (dashed arrow P \u2192 R)',x:'The process asks for a resource that has no free instance, so it must wait.'},
+  DEADLOCK:{t:'DEADLOCK',x:'A deadlock occurs when processes wait for resources held by each other, creating a cycle.'},
+  SAFE:{t:'SAFE STATE',x:'No circular wait exists, so every process can eventually finish.'}
+};
+
+var flashT=null;
+function flash(msg){
+  var f=$('#flash'); if(!f) return;
+  f.textContent=msg; f.classList.add('on');
+  clearTimeout(flashT); flashT=setTimeout(function(){ f.classList.remove('on'); },2600);
+}
+
+function stateCls(){ return S.systemState==='DEADLOCK'?'bad':(!S.checked?'warn':'ok'); }
+function dlLabel(){ return S.systemState==='DEADLOCK'?'YES':(!S.checked?'UNCHECKED':'NO'); }
+function sysLabel(){ return S.systemState==='DEADLOCK'?'DEADLOCK':(!S.checked?'CHECK NEEDED':'SAFE'); }
+
+function updateDashboard(){
+  if(!$('#summary')) return;
+  var P=S.processes, run=S.currentCPUProcess||'-';
+  var wt=P.filter(function(p){return p.state==='WAITING';}).map(function(p){return p.id;});
+  var c=stateCls();
+  $('#summary').innerHTML='PROC <b>'+P.length+'</b> &middot; RUN <b>'+run+'</b> &middot; READY <b>'+listJoin(S.readyQueue)+'</b> &middot; WAIT <b>'+listJoin(wt)+
+    '</b> &middot; ALLOC <b>'+S.allocations.length+'</b> &middot; DEADLOCK <b class="'+c+'">'+dlLabel()+'</b> &middot; <b class="'+c+'">'+sysLabel()+'</b>';
+  var h='<div class="kv"><span>PROCESSES</span><span>'+P.length+'</span><span>RUNNING</span><span>'+run+'</span><span>READY</span><span>'+listJoin(S.readyQueue)+
+    '</span><span>WAITING</span><span>'+listJoin(wt)+'</span><span>ALLOCATED RESOURCES</span><span>'+S.allocations.length+
+    '</span><span>DEADLOCK</span><span class="'+c+'">'+dlLabel()+'</span><span>SYSTEM</span><span class="'+c+'">'+sysLabel()+'</span></div><div class="chips">';
+  P.forEach(function(p){ h+='<button data-sel="proc:'+p.id+'" style="border-color:'+PCOL[p.id]+'">'+p.id+' \u00B7 '+p.state+'</button>'; });
+  S.resources.forEach(function(r){ h+='<button data-sel="res:'+r.id+'">'+r.id+' \u00B7 free '+available(r.id)+'/'+r.total+'</button>'; });
+  h+='</div>';
+  $('#tabStatus').innerHTML=h;
+}
+
+function updateEventLog(){
+  var ll=$('#logList'); if(!ll) return;
+  ll.innerHTML=S.events.slice(0,12).map(function(e){ return '<div><span>['+e.t+']</span> '+esc(e.msg)+'</div>'; }).join('');
+  $('#miniLog').innerHTML=S.events.slice(0,3).map(function(e){ return '['+e.t+'] '+esc(e.msg); }).join('<br>')||'[--:--] waiting for events';
+}
+
+function renderConcept(){
+  if(!$('#cTitle')) return;
+  if(S.view==='selection' && S.selected){
+    var s=S.selected, h='';
+    if(s.type==='proc'){
+      var p=getProc(s.id);
+      if(p){
+        var q=requestOf(p.id), held=heldBy(p.id);
+        h='Process: <b>'+p.id+'</b><br>State: <b>'+p.state+'</b><br>Holding: <b>'+listJoin(held)+'</b><br>Requesting: <b>'+(q?q.res:'-')+'</b><br><span style="color:#94a3b8">'+CONCEPTS[p.state].x+'</span>';
+        $('#cTitle').textContent='PROCESS DETAILS';
+        $('#cText').innerHTML=h; return;
+      }
+    } else {
+      var r=getRes(s.id);
+      if(r){
+        $('#cTitle').textContent='RESOURCE DETAILS';
+        $('#cText').innerHTML='Resource: <b>'+r.id+'</b> ('+r.name+')<br>Instances: <b>'+r.total+'</b><br>Allocated to: <b>'+listJoin(holdersOf(r.id))+'</b><br>Available: <b>'+available(r.id)+'</b>';
+        return;
+      }
+    }
+  }
+  var c=CONCEPTS[S.concept]||CONCEPTS.WELCOME;
+  $('#cTitle').textContent=c.t;
+  $('#cText').textContent=c.x;
+}
+
+function renderBanner(){
+  var el=$('#banner'); if(!el) return;
+  var b=S.banner;
+  if(!b){ el.className='card hidden'; el.innerHTML=''; return; }
+  el.className='card '+b.kind;
+  var h='<div class="bt"><span>'+esc(b.title)+'</span>'+(b.kind!=='deadlock'?'<button class="x" data-close="1">\u2715</button>':'')+'</div>';
+  b.lines.forEach(function(l){
+    if(l.indexOf('##')===0) h+='<div class="bh">'+esc(l.slice(2).trim())+'</div>';
+    else h+='<p>'+esc(l)+'</p>';
+  });
+  if(b.actions && b.actions.length){
+    h+='<div class="bh">RECOVERY OPTIONS</div><div class="acts">'+b.actions.map(function(a,i){ return '<button data-ra="'+i+'" class="'+(a.kind==='reset'?'danger':'')+'">'+esc(a.label)+'</button>'; }).join('')+'</div>';
+  }
+  el.innerHTML=h;
+}
+
+function actor(){
+  if(S.selected && S.selected.type==='proc'){
+    var p=getProc(S.selected.id);
+    if(p && p.state!=='TERMINATED') return p.id;
+  }
+  return S.currentCPUProcess;
+}
+
+function updateControls(){
+  var paused=S.systemState==='DEADLOCK';
+  var btns=document.querySelectorAll('#sheet button[data-act]');
+  for(var i=0;i<btns.length;i++){
+    var b=btns[i], a=b.getAttribute('data-act'), dis=false;
+    if(a==='reset'||a.indexOf('sc-')===0) dis=false;
+    else if(busy>0) dis=true;
+    else if(a.indexOf('create-')===0) dis=paused||!!getProc(a.slice(7));
+    else if(a==='terminate'||a==='detect') dis=false;
+    else dis=paused;           // run / request / release
+    b.disabled=dis;
+  }
+  var ac=actor(), el=$('#actor');
+  if(el) el.textContent=ac?' \u2192 acting on '+ac:' \u2192 select a process';
+  var d=$('#btnDetect');
+  if(d) d.classList.toggle('pulse', !S.checked && S.systemState!=='DEADLOCK' && busy===0);
+}
+
+function select(type,id){
+  S.selected={type:type,id:id}; S.view='selection';
+  renderConcept(); updateControls();
+}
+
+function onChange(){
+  syncVisuals();
+  updateDashboard();
+  renderConcept();
+  updateControls();
+}
+
+function clearSoftBanner(){
+  if(S.banner && S.banner.kind!=='deadlock'){ S.banner=null; renderBanner(); }
+}
+
+function handleAct(a){
+  if(a==='reset'){ resetSimulation(); return; }
+  if(a.indexOf('sc-')===0){ loadScenario(a.slice(3)); return; }
+  if(busy>0) return;
+  clearSoftBanner();
+  if(a.indexOf('create-')===0){ createProcess(a.slice(7)); return; }
+  if(a==='run'){ withLock(function(w){ return runNextCore(w); }); return; }
+  if(a==='detect'){ detectDeadlock(); return; }
+  var ac=actor();
+  if(a==='terminate'){
+    if(!ac){ flash('Tap a process first (or use the recovery options)'); return; }
+    if(S.systemState==='DEADLOCK' && S.deadlockedProcesses.indexOf(ac)>=0) recoverFromDeadlock({kind:'terminate',proc:ac});
+    else terminateProcess(ac);
+    return;
+  }
+  if(a.indexOf('req-')===0){
+    if(!ac){ flash('Tap a process first, or RUN NEXT'); return; }
+    requestResource(ac,a.slice(4)); return;
+  }
+  if(a.indexOf('rel-')===0){
+    if(!ac){ flash('Tap a process first, or RUN NEXT'); return; }
+    releaseResource(ac,a.slice(4)); return;
+  }
+}
+
+/* ======================================================================
+   AR / 3D VISUALIZATION
+   ====================================================================== */
+var V={ready:false,root:null,procs:{},ress:{},arrows:{},arrowRoot:null,sel:null,mode:'ar',scene:null,camEl:null,cursorEl:null,
+       cpuPlate:null,cpuText:null,ctxTag:null,ctxRing:null,cones:[],mon:{},yaw:0,elev:0.66,zoom:1};
+
+var STATE_COL={NEW:'#94a3b8',READY:'#facc15',RUNNING:'#22c55e',WAITING:'#fb923c',TERMINATED:'#475569'};
+var NEW_X=[-4.1,-3.1,-2.1], TERM_X=[2.1,3.1,4.1], Q_X=[-1.0,-2.2,-3.4];
+var CPU_POS={x:1.8,y:0.22,z:-1.9};
+
+function mk(tag,attrs,parent){
+  var e=document.createElement(tag);
+  if(attrs){ for(var k in attrs){ e.setAttribute(k,attrs[k]); } }
+  if(parent) parent.appendChild(e);
+  return e;
+}
+function txt(parent,value,pos,o){
+  o=o||{};
+  var t={value:value,align:o.align||'center',color:o.color||'#e2e8f0',width:o.width||4,side:'double'};
+  if(o.wrap) t.wrapCount=o.wrap;
+  return mk('a-entity',{text:t,position:pos,rotation:o.rot||'0 0 0'},parent);
+}
+function ascii(s){ return String(s).replace(/\u2192/g,'->'); }
+function setText(el,v,c){ if(!el) return; el.setAttribute('text','value',ascii(v)); if(c) el.setAttribute('text','color',c); }
+
+function frame(parent,cx,cz,w,d,color,y){
+  var t=0.05, h=0.03, m='shader:flat; color:'+color+'; opacity:.9; transparent:true';
+  mk('a-box',{width:w,height:h,depth:t,position:cx+' '+y+' '+(cz-d/2),material:m},parent);
+  mk('a-box',{width:w,height:h,depth:t,position:cx+' '+y+' '+(cz+d/2),material:m},parent);
+  mk('a-box',{width:t,height:h,depth:d,position:(cx-w/2)+' '+y+' '+cz,material:m},parent);
+  mk('a-box',{width:t,height:h,depth:d,position:(cx+w/2)+' '+y+' '+cz,material:m},parent);
+}
+function pad3(parent,cx,cz,w,d,color,label){
+  mk('a-box',{width:w,height:0.05,depth:d,position:cx+' 0.025 '+cz,material:'color:#101b33; metalness:.3; roughness:.7'},parent);
+  frame(parent,cx,cz,w,d,color,0.06);
+  if(label) txt(parent,label,cx+' 0.07 '+(cz+d/2-0.17),{rot:'-90 0 0',width:2.6,color:color});
+}
+
+function buildWorld(){
+  var root=V.root;
+  mk('a-light',{type:'ambient',color:'#cfe3ff',intensity:0.9},root);
+  mk('a-light',{type:'directional',color:'#ffffff',intensity:0.9,position:'3 8 6'},root);
+  // floor
+  mk('a-box',{width:10.8,height:0.2,depth:8.6,position:'0 -0.1 0.05',material:'color:#0a1226; metalness:.5; roughness:.55'},root);
+  frame(root,0,0.05,10.8,8.6,'#38bdf8',0.01);
+  // zones
+  pad3(root,-3.1,-0.2,3.8,1.4,'#94a3b8','PROCESS CREATION / NEW');
+  pad3(root,-2.2,-1.9,4.0,1.4,'#facc15','READY QUEUE (FIFO)');
+  pad3(root,1.8,-1.9,2.2,1.4,'#22c55e',null);
+  pad3(root,3.1,-0.2,3.8,1.4,'#64748b','TERMINATED');
+  txt(root,'WAITING AREA',  '0 0.04 1.78',{rot:'-90 0 0',width:2.4,color:'#fb923c'});
+  // CPU chip
+  mk('a-box',{width:1.6,height:0.18,depth:1.6,position:CPU_POS.x+' 0.12 '+CPU_POS.z,material:'color:#1e293b; metalness:.7; roughness:.35'},root);
+  V.cpuPlate=mk('a-box',{width:1.2,height:0.03,depth:1.2,position:CPU_POS.x+' 0.215 '+CPU_POS.z,material:'shader:flat; color:#38bdf8; opacity:.55; transparent:true'},root);
+  V.cpuText=txt(root,'CPU \u00B7 IDLE',CPU_POS.x+' 0.07 '+(CPU_POS.z+0.53),{rot:'-90 0 0',width:2.4,color:'#4ade80'});
+  // queue -> CPU chevrons
+  for(var i=0;i<2;i++){
+    V.cones.push(mk('a-cone',{'radius-bottom':0.14,'radius-top':0,height:0.3,rotation:'0 0 -90',position:(0.05+i*0.38)+' 0.12 '+CPU_POS.z,material:'shader:flat; color:#38bdf8; transparent:true; opacity:.8'},root));
+  }
+  // context switch indicator
+  V.ctxRing=mk('a-torus',{radius:0.95,'radius-tubular':0.04,rotation:'90 0 0',position:CPU_POS.x+' 0.3 '+CPU_POS.z,material:'shader:flat; color:#fbbf24'},root);
+  V.ctxTag=mk('a-entity',{position:'0.6 1.9 '+CPU_POS.z},root);
+  txt(V.ctxTag,'CONTEXT SWITCH','0 0 0',{width:3.6,color:'#fbbf24'});
+  // deadlock monitor
+  var m=mk('a-entity',{position:'0 0 -3.75'},root);
+  mk('a-box',{width:5.7,height:1.9,depth:0.05,position:'0 1.95 -0.05',material:'shader:flat; color:#38bdf8'},m);
+  V.mon.glow=m.lastChild;
+  mk('a-box',{width:5.5,height:1.7,depth:0.1,position:'0 1.95 0',material:'color:#060c1a; metalness:.5; roughness:.4'},m);
+  mk('a-box',{width:0.3,height:1.1,depth:0.15,position:'0 0.55 -0.05',material:'color:#1e293b'},m);
+  mk('a-box',{width:1.8,height:0.08,depth:0.7,position:'0 0.04 -0.05',material:'color:#1e293b'},m);
+  txt(m,'DEADLOCK MONITOR','0 2.62 0.07',{width:3.8,color:'#7dd3fc'});
+  V.mon.status=txt(m,'SYSTEM SAFE','0 2.15 0.07',{width:5.2,color:'#4ade80'});
+  V.mon.detail=txt(m,'No pending requests','0 1.62 0.07',{width:4.4,color:'#cbd5e1',wrap:44});
+  // resources
+  RES_DEF.forEach(function(d){ V.ress[d.id]=new ResView(d); });
+  // selection ring + arrows
+  V.sel=mk('a-torus',{radius:0.62,'radius-tubular':0.03,rotation:'90 0 0',material:'shader:flat; color:#ffffff'},root);
+  V.arrowRoot=mk('a-entity',{},root);
+}
+
+function ResView(def){
+  this.def=def;
+  this.el=mk('a-entity',{},V.root);
+  pad3(this.el,def.x,3.1,2.3,1.4,'#14b8a6',def.id+' \u00B7 '+def.name);
+  this.inst=[];
+  var xs=def.total===1?[0]:[-0.45,0.45], self=this;
+  for(var i=0;i<def.total;i++){
+    var c=mk('a-cylinder',{radius:0.3,height:0.7,position:(def.x+xs[i])+' 0.4 3.1',material:'color:#14b8a6; emissive:#0f766e; emissiveIntensity:.6; metalness:.3; roughness:.35',class:'clickable'},V.root);
+    c.addEventListener('click',function(){ select('res',def.id); });
+    this.inst.push(c);
+  }
+  this.tag=mk('a-entity',{position:def.x+' 0 3.1'},V.root);
+  txt(this.tag,def.id,'0 1.5 0',{width:4.2,color:'#5eead4'});
+  this.stat=txt(this.tag,'free 1/1','0 1.2 0',{width:2.3,color:'#cbd5e1'});
+  this.hot=false;
+}
+ResView.prototype.refresh=function(r){
+  var h=holdersOf(r.id), self=this;
+  this.inst.forEach(function(c,i){
+    if(h[i]){ var col=PCOL[h[i]]; c.setAttribute('material','color',col); c.setAttribute('material','emissive',col); c.setAttribute('material','emissiveIntensity',0.9); }
+    else { c.setAttribute('material','color','#14b8a6'); c.setAttribute('material','emissive','#0f766e'); c.setAttribute('material','emissiveIntensity',0.6); }
+  });
+  setText(this.stat,(r.total-h.length>0?'FREE ':'ALLOCATED ')+(r.total-h.length)+'/'+r.total, r.total-h.length>0?'#5eead4':'#fdba74');
+  this.hot=S.cycle.indexOf(r.id)>=0;
+};
+
+function ProcView(p){
+  this.id=p.id; this.col=PCOL[p.id];
+  this.cur=new THREE.Vector3(); this.tgt=new THREE.Vector3(); this.placed=false; this.born=performance.now();
+  var self=this;
+  this.el=mk('a-entity',{},V.root);
+  this.box=mk('a-box',{width:0.62,height:0.62,depth:0.62,position:'0 0.4 0',material:'color:'+this.col+'; metalness:.3; roughness:.35; opacity:.62; transparent:true',class:'clickable'},this.el);
+  this.core=mk('a-sphere',{radius:0.15,position:'0 0.4 0',material:'shader:flat; color:#94a3b8'},this.el);
+  this.ring=mk('a-torus',{radius:0.5,'radius-tubular':0.035,'segments-tubular':24,'segments-radial':6,rotation:'90 0 0',position:'0 0.06 0',material:'shader:flat; color:#94a3b8'},this.el);
+  this.tag=mk('a-entity',{},this.el);
+  txt(this.tag,p.id,'0 1.28 0',{width:4.4,color:'#ffffff'});
+  this.stateT=txt(this.tag,'NEW','0 0.98 0',{width:2.4,color:'#94a3b8'});
+  this.box.addEventListener('click',function(){ select('proc',self.id); });
+  this.hot=false; this.dead=false;
+}
+ProcView.prototype.target=function(p){
+  var id=p.id;
+  switch(p.state){
+    case 'NEW': return [NEW_X[PIDS.indexOf(id)],0.05,-0.2];
+    case 'READY': var qi=Math.max(0,S.readyQueue.indexOf(id)); return [Q_X[qi],0.05,-1.9];
+    case 'RUNNING': return [CPU_POS.x,CPU_POS.y,CPU_POS.z];
+    case 'WAITING':
+      var q=requestOf(id), rx=q?getResX(q.res):0;
+      var same=S.processes.filter(function(o){ var oq=requestOf(o.id); return o.state==='WAITING' && oq && q && oq.res===q.res; }).map(function(o){return o.id;});
+      var off=[0,1.05,-1.05][Math.max(0,same.indexOf(id))]||0;
+      return [rx+off,0.05,1.1];
+    default: var ti=Math.max(0,S.terminated.indexOf(id)); return [TERM_X[ti],0.05,-0.2];
+  }
+};
+function getResX(rid){ for(var i=0;i<RES_DEF.length;i++){ if(RES_DEF[i].id===rid) return RES_DEF[i].x; } return 0; }
+ProcView.prototype.refresh=function(p){
+  var t=this.target(p);
+  this.tgt.set(t[0],t[1],t[2]);
+  if(!this.placed){ this.cur.set(t[0],t[1]+2.2,t[2]); this.placed=true; }
+  this.dead=S.deadlockedProcesses.indexOf(p.id)>=0 && S.systemState==='DEADLOCK';
+  var c=this.dead?'#ef4444':STATE_COL[p.state];
+  this.core.setAttribute('material','color',c);
+  this.ring.setAttribute('material','color',c);
+  this.box.setAttribute('material','opacity',p.state==='TERMINATED'?0.2:0.62);
+  setText(this.stateT,this.dead?'DEADLOCKED':p.state,c);
+};
+ProcView.prototype.destroy=function(){ if(this.el.parentNode) this.el.parentNode.removeChild(this.el); };
+
+/* ----- dependency arrows (allocation = solid, request = dashed/marching) ----- */
+var GEO={};
+function arrowGeos(){ if(!GEO.cyl){ GEO.cyl=new THREE.CylinderGeometry(1,1,1,8); GEO.cone=new THREE.ConeGeometry(1,1,12); } }
+function Arrow(key,from,to,type){
+  arrowGeos();
+  this.key=key; this.from=from; this.to=to; this.type=type; this.hot=false;
+  this.mat=new THREE.MeshBasicMaterial({color:type==='allocation'?0x34d399:0xfbbf24,transparent:true,opacity:0.95});
+  this.group=new THREE.Group();
+  this.head=new THREE.Mesh(GEO.cone,this.mat); this.group.add(this.head);
+  this.dashes=[];
+  if(type==='allocation'){ this.shaft=new THREE.Mesh(GEO.cyl,this.mat); this.group.add(this.shaft); }
+  else { for(var i=0;i<8;i++){ var d=new THREE.Mesh(GEO.cyl,this.mat); this.group.add(d); this.dashes.push(d); } }
+  V.arrowRoot.object3D.add(this.group);
+}
+Arrow.prototype.setHot=function(h){ this.hot=h; this.mat.color.set(h?0xef4444:(this.type==='allocation'?0x34d399:0xfbbf24)); };
+Arrow.prototype.destroy=function(){ V.arrowRoot.object3D.remove(this.group); this.mat.dispose(); };
+var _a=null,_b=null,_d=null,_q=null,_up=null,_c=null;
+function nodePos(id,out,lift){
+  if(id[0]==='P'){ var v=V.procs[id]; if(!v) return false; out.copy(v.cur); out.y+=0.42+lift; return true; }
+  out.set(getResX(id),0.42+lift,3.1); return true;
+}
+Arrow.prototype.update=function(t){
+  if(!_a){ _a=new THREE.Vector3(); _b=new THREE.Vector3(); _d=new THREE.Vector3(); _q=new THREE.Quaternion(); _up=new THREE.Vector3(0,1,0); _c=new THREE.Vector3(); }
+  var lift=this.type==='request'?0.3:0.0;
+  if(!nodePos(this.from,_a,lift)||!nodePos(this.to,_b,lift)){ this.group.visible=false; return; }
+  _d.subVectors(_b,_a); var len=_d.length();
+  var sp=this.from[0]==='P'?0.5:0.7, ep=this.to[0]==='P'?0.55:0.7;
+  var L=len-sp-ep;
+  if(len<0.01||L<0.22){ this.group.visible=false; return; }
+  this.group.visible=true;
+  _d.normalize(); _q.setFromUnitVectors(_up,_d);
+  var headLen=0.34, shaftLen=Math.max(0.05,L-headLen);
+  var pulse=this.hot?(1+0.45*Math.sin(t*7)):1, r=0.055*pulse;
+  this.mat.opacity=this.hot?(0.65+0.35*Math.sin(t*7)*Math.sin(t*7)):0.95;
+  _c.copy(_a).addScaledVector(_d,sp+L-headLen/2);
+  this.head.position.copy(_c); this.head.quaternion.copy(_q); this.head.scale.set(r*3.2,headLen,r*3.2);
+  if(this.shaft){
+    _c.copy(_a).addScaledVector(_d,sp+shaftLen/2);
+    this.shaft.position.copy(_c); this.shaft.quaternion.copy(_q); this.shaft.scale.set(r,shaftLen,r);
+  } else {
+    var n=this.dashes.length, dl=shaftLen/n*0.5;
+    for(var i=0;i<n;i++){
+      var u=((i/n)+t*0.35)%1, off=u*shaftLen, m=this.dashes[i];
+      if(off+dl/2>shaftLen){ m.visible=false; continue; }
+      m.visible=true; _c.copy(_a).addScaledVector(_d,sp+off+dl/2);
+      m.position.copy(_c); m.quaternion.copy(_q); m.scale.set(r,dl,r);
+    }
+  }
+};
+
+function syncArrows(){
+  var want={}, hotPairs={}, c=S.cycle;
+  for(var i=0;i<c.length;i++) hotPairs[c[i]+'>'+c[(i+1)%c.length]]=true;
+  S.allocations.forEach(function(a){ want['A:'+a.res+'>'+a.proc]={from:a.res,to:a.proc,type:'allocation'}; });
+  S.requests.forEach(function(q){ want['Q:'+q.proc+'>'+q.res]={from:q.proc,to:q.res,type:'request'}; });
+  Object.keys(V.arrows).forEach(function(k){ if(!want[k]){ V.arrows[k].destroy(); delete V.arrows[k]; } });
+  Object.keys(want).forEach(function(k){
+    var w=want[k];
+    if(!V.arrows[k]) V.arrows[k]=new Arrow(k,w.from,w.to,w.type);
+    V.arrows[k].setHot(!!hotPairs[w.from+'>'+w.to] && S.systemState==='DEADLOCK');
+  });
+}
+
+function syncVisuals(){
+  if(!V.ready) return;
+  S.processes.forEach(function(p){
+    var v=V.procs[p.id]; if(!v) v=V.procs[p.id]=new ProcView(p);
+    v.refresh(p);
+  });
+  if(V.cursorEl && V.cursorEl.components && V.cursorEl.components.raycaster) V.cursorEl.components.raycaster.refreshObjects();
+  S.resources.forEach(function(r){ V.ress[r.id].refresh(r); });
+  syncArrows();
+  var run=S.currentCPUProcess;
+  setText(V.cpuText,'CPU \u00B7 '+(run?run:'IDLE'),run?'#4ade80':'#7dd3fc');
+  V.cpuPlate.setAttribute('material','color',run?'#22c55e':'#38bdf8');
+  // monitor
+  var st=S.systemState, mon=V.mon;
+  if(st==='DEADLOCK'){
+    setText(mon.status,'DEADLOCK DETECTED','#f87171'); setText(mon.detail,'Cycle: '+cycleStr(S.cycle),'#fecaca'); mon.glow.setAttribute('material','color','#ef4444');
+  } else if(!S.checked){
+    setText(mon.status,'CHECK NEEDED','#fbbf24'); setText(mon.detail,'Pending requests. Press DETECT DEADLOCK.','#fde68a'); mon.glow.setAttribute('material','color','#f59e0b');
+  } else {
+    setText(mon.status,'SYSTEM SAFE','#4ade80'); setText(mon.detail,S.requests.length?'No circular wait found':'No pending requests','#cbd5e1'); mon.glow.setAttribute('material','color','#22c55e');
+  }
+}
+
+function destroyVisuals(){
+  Object.keys(V.procs).forEach(function(k){ V.procs[k].destroy(); }); V.procs={};
+  Object.keys(V.arrows).forEach(function(k){ V.arrows[k].destroy(); }); V.arrows={};
+}
+
+/* ----- render loop (lerp movement, pulses, billboards) ----- */
+var last=performance.now(), tmpV=null;
+function loop(now){
+  requestAnimationFrame(loop);
+  if(!V.ready) return;
+  if(!tmpV) tmpV=new THREE.Vector3();
+  var dt=Math.min(0.05,(now-last)/1000); last=now;
+  var t=now/1000, k=1-Math.exp(-dt*7);
+  var cam=V.scene && V.scene.camera;
+  if(cam) cam.getWorldPosition(tmpV);
+  if(V.mode==='3d') placeCamera();
+  var selPos=null;
+  Object.keys(V.procs).forEach(function(id){
+    var v=V.procs[id];
+    v.cur.lerp(v.tgt,k);
+    var o=v.el.object3D; o.position.copy(v.cur);
+    var born=Math.min(1,(now-v.born)/600), s=0.01+0.99*(1-Math.pow(1-born,3));
+    if(v.dead) s*=1+0.1*Math.sin(t*8);
+    o.scale.setScalar(s);
+    if(cam) v.tag.object3D.lookAt(tmpV);
+    if(S.selected && S.selected.type==='proc' && S.selected.id===id) selPos=v.cur;
+  });
+  Object.keys(V.ress).forEach(function(id){
+    var r=V.ress[id];
+    r.inst.forEach(function(c){ var s=r.hot?(1+0.12*Math.sin(t*8)):1; c.object3D.scale.set(s,1,s); });
+    if(cam) r.tag.object3D.lookAt(tmpV);
+    if(S.selected && S.selected.type==='res' && S.selected.id===id) selPos=new THREE.Vector3(getResX(id),0,3.1);
+  });
+  if(V.sel){
+    V.sel.object3D.visible=!!selPos;
+    if(selPos){ V.sel.object3D.position.set(selPos.x,0.09,selPos.z); var ss=1+0.06*Math.sin(t*6); V.sel.object3D.scale.set(ss,ss,ss); }
+  }
+  Object.keys(V.arrows).forEach(function(k2){ V.arrows[k2].update(t); });
+  var ctx=S.ctx && Date.now()<S.ctx.until;
+  V.ctxRing.object3D.visible=!!ctx; V.ctxTag.object3D.visible=!!ctx;
+  if(ctx){ V.ctxRing.object3D.rotation.z=t*3; if(cam) V.ctxTag.object3D.lookAt(tmpV); }
+  V.cones.forEach(function(c,i){ c.object3D.visible=((Math.floor(t*3)+i)%2===0); });
+  V.mon.glow.object3D.scale.y=1+(S.systemState==='DEADLOCK'?0.03*Math.sin(t*8):0);
+}
+
+/* ----- 3D fallback camera + drag/zoom ----- */
+function placeCamera(){
+  var aspect=window.innerWidth/window.innerHeight, kk=Math.max(1,1.0/aspect);
+  var dist=7.8*kk*V.zoom, o=V.camEl.object3D;
+  o.position.set(0,Math.sin(V.elev)*dist,Math.cos(V.elev)*dist+0.3);
+  o.lookAt(0,0.2,0.3);
+}
+function enableOrbit(){
+  var cv=V.scene.canvas, pts={}, lastD=0;
+  cv.addEventListener('pointerdown',function(e){ pts[e.pointerId]={x:e.clientX,y:e.clientY}; });
+  cv.addEventListener('pointerup',function(e){ delete pts[e.pointerId]; lastD=0; });
+  cv.addEventListener('pointercancel',function(e){ delete pts[e.pointerId]; lastD=0; });
+  cv.addEventListener('pointermove',function(e){
+    var p=pts[e.pointerId]; if(!p) return;
+    var ids=Object.keys(pts);
+    if(ids.length===1){
+      V.root.object3D.rotation.y+=(e.clientX-p.x)*0.008;
+      V.elev=Math.max(0.25,Math.min(1.35,V.elev+(e.clientY-p.y)*0.005));
+    } else if(ids.length===2){
+      var a=pts[ids[0]], b=pts[ids[1]];
+      if(e.pointerId==ids[0]) a={x:e.clientX,y:e.clientY}; else b={x:e.clientX,y:e.clientY};
+      var d=Math.hypot(a.x-b.x,a.y-b.y);
+      if(lastD) V.zoom=Math.max(0.45,Math.min(2.2,V.zoom*(lastD/d)));
+      lastD=d;
+    }
+    p.x=e.clientX; p.y=e.clientY;
+  });
+  cv.addEventListener('wheel',function(e){ V.zoom=Math.max(0.45,Math.min(2.2,V.zoom*(1+e.deltaY*0.001))); e.preventDefault(); },{passive:false});
+}
+
+/* ----- launching ----- */
+var AR_MARKUP=
+ '<a-scene id="scene" vr-mode-ui="enabled: false" renderer="logarithmicDepthBuffer: true; alpha: true" arjs="sourceType: webcam; debugUIEnabled: false;">'+
+ '<a-marker id="marker" preset="hiro"><a-entity id="root" scale="0.2 0.2 0.2"></a-entity></a-marker>'+
+ '<a-entity id="cam" camera></a-entity>'+
+ '<a-entity id="cursor" cursor="rayOrigin: mouse; fuse: false" raycaster="objects: .clickable; far: 100"></a-entity>'+
+ '</a-scene>';
+var D3_MARKUP=
+ '<a-scene id="scene" vr-mode-ui="enabled: false" renderer="antialias: true">'+
+ '<a-sky color="#060b16"></a-sky>'+
+ '<a-entity id="root"></a-entity>'+
+ '<a-entity id="cam" camera position="0 6 8"></a-entity>'+
+ '<a-entity id="cursor" cursor="rayOrigin: mouse; fuse: false" raycaster="objects: .clickable; far: 100"></a-entity>'+
+ '</a-scene>';
+
+function showCamError(why){
+  $('#loader').classList.add('hidden'); $('#landing').classList.add('hidden');
+  $('#camWhy').textContent=why?' ('+why+')':'';
+  $('#camError').classList.remove('hidden');
+}
+
+function launch(mode){
+  if(!window.AFRAME){ alert('A-Frame failed to load. Check your internet connection and reload.'); return; }
+  $('#landing').classList.add('hidden'); $('#camError').classList.add('hidden');
+  $('#loaderText').textContent=mode==='ar'?'Starting camera & AR\u2026':'Loading 3D simulation\u2026';
+  $('#loader').classList.remove('hidden');
+  var host=$('#sceneHost');
+  host.innerHTML=mode==='ar'?AR_MARKUP:D3_MARKUP;
+  var scene=document.getElementById('scene');
+  var done=false;
+  function ready(){
+    if(done) return; done=true;
+    V.scene=scene; V.root=document.getElementById('root'); V.camEl=document.getElementById('cam'); V.cursorEl=document.getElementById('cursor'); V.mode=mode;
+    buildWorld(); V.ready=true;
+    if(mode==='3d'){ enableOrbit(); placeCamera(); $('#hint').innerHTML='Drag to rotate &middot; pinch / scroll to zoom &middot; tap objects for details'; $('#modeBadge').textContent='3D MODE'; setTimeout(function(){ $('#hint').classList.add('hidden'); },4500); }
+    else {
+      $('#modeBadge').textContent='AR MODE';
+      var m=document.getElementById('marker');
+      m.addEventListener('markerFound',function(){ $('#hint').classList.add('hidden'); });
+      m.addEventListener('markerLost',function(){ $('#hint').classList.remove('hidden'); });
+    }
+    $('#hud').classList.remove('hidden');
+    setTimeout(function(){ $('#loader').classList.add('hidden'); },mode==='ar'?1200:200);
+    resetSimulation(true); S.events=[]; updateEventLog();
+    logEvent('OS Control Room online');
+    setConcept('WELCOME');
+  }
+  if(scene.hasLoaded) ready(); else scene.addEventListener('loaded',ready);
+  if(mode==='ar'){
+    window.addEventListener('camera-error',function(){ showCamError('camera error'); });
+  }
+}
+
+async function startAR(){
+  $('#loaderText').textContent='Requesting camera permission\u2026';
+  $('#landing').classList.add('hidden'); $('#loader').classList.remove('hidden');
+  try{
+    if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) throw new Error(window.isSecureContext?'camera API unavailable':'AR needs HTTPS or localhost');
+    var st=await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment'}});
+    st.getTracks().forEach(function(t){ t.stop(); });
+    launch('ar');
+  }catch(e){
+    showCamError(e && e.message?e.message:'');
+  }
+}
+
+/* ----- wiring ----- */
+document.addEventListener('DOMContentLoaded',function(){
+  $('#btnStartAR').addEventListener('click',startAR);
+  $('#btnStart3D').addEventListener('click',function(){ launch('3d'); });
+  $('#btnFallback').addEventListener('click',function(){ launch('3d'); });
+  $('#btnReload').addEventListener('click',function(){ location.reload(); });
+  $('#btnHome').addEventListener('click',function(){ location.reload(); });
+  $('#btnPanel').addEventListener('click',function(){ $('#panel').classList.toggle('hidden'); });
+  $('#btnSheet').addEventListener('click',function(){
+    var b=$('#sheetBody'); b.classList.toggle('hidden'); this.innerHTML=b.classList.contains('hidden')?'&#9650;':'&#9660;';
+  });
+  if(window.innerWidth>=900) $('#panel').classList.remove('hidden');
+  document.querySelectorAll('.tabs button').forEach(function(b){
+    b.addEventListener('click',function(){
+      document.querySelectorAll('.tabs button').forEach(function(x){ x.classList.toggle('on',x===b); });
+      $('#tabStatus').classList.toggle('hidden',b.getAttribute('data-tab')!=='status');
+      $('#tabLog').classList.toggle('hidden',b.getAttribute('data-tab')!=='log');
+    });
+  });
+  $('#sheet').addEventListener('click',function(e){
+    var b=e.target.closest('button[data-act]'); if(!b||b.disabled) return;
+    handleAct(b.getAttribute('data-act'));
+  });
+  $('#tabStatus').addEventListener('click',function(e){
+    var b=e.target.closest('button[data-sel]'); if(!b) return;
+    var p=b.getAttribute('data-sel').split(':'); select(p[0],p[1]);
+  });
+  $('#banner').addEventListener('click',function(e){
+    var x=e.target.closest('button[data-close]');
+    if(x){ S.banner=null; renderBanner(); return; }
+    var b=e.target.closest('button[data-ra]'); if(!b||!S.banner) return;
+    var a=S.banner.actions[+b.getAttribute('data-ra')]; if(!a) return;
+    if(a.kind==='reset') resetSimulation(); else recoverFromDeadlock(a);
+  });
+  updateDashboard(); updateEventLog(); renderConcept(); updateControls();
+  requestAnimationFrame(loop);
+});
+})();
+</script>
+</body>
+</html>
